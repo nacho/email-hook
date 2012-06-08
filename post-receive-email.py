@@ -85,7 +85,7 @@ class Mailer(object):
         if html_message:
             msg = MIMEMultipart('alternative')
             msg['From'] = committer
-            msg['To'] = ', '.join(self.recipients)
+            msg['To'] = self.recipients
             msg['Subject'] = subject
 
             part1 = MIMEText(message, 'plain')
@@ -96,7 +96,7 @@ class Mailer(object):
         else:
             msg = MIMEText(message, _charset='utf-8')
             msg['From'] = committer
-            msg['To'] = ', '.join(self.recipients)
+            msg['To'] = self.recipients
             msg['Subject'] = subject
 
         server = smtplib.SMTP(self.smtp_host, self.smtp_port)
