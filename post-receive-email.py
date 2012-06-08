@@ -33,7 +33,12 @@ import re
 import os
 import pwd
 import sys
-from email import Header
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pygments import highlight
+from pygments.lexers import DiffLexer
+from pygments.formatters import HtmlFormatter
 
 script_path = os.path.realpath(os.path.abspath(sys.argv[0]))
 script_dir = os.path.dirname(script_path)
@@ -41,7 +46,7 @@ script_dir = os.path.dirname(script_path)
 sys.path.insert(0, script_dir)
 
 from git import *
-from util import die, strip_string as s, start_email, end_email
+from util import die, strip_string as s
 
 # When we put a git subject into the Subject: line, where to truncate
 SUBJECT_MAX_SUBJECT_CHARS = 100
@@ -54,23 +59,64 @@ INVALID_TAG = 3
 # Short name for project
 projectshort = None
 
-# Human readable name for user, might be None
-user_fullname = None
-
-# Who gets the emails
-recipients = None
-
 # map of ref_name => Change object; this is used when computing whether
 # we've previously generated a detailed diff for a commit in the push
 all_changes = {}
 processed_changes = {}
 
+class Mailer(object):
+    def __init__(self, smtp_host, smtp_port,
+                 sender, sender_password, user_fullname, recipients):
+        self.smtp_host = smtp_host
+        self.smtp_port = smtp_port
+        self.sender = sender
+        self.sender_password = sender_password
+        self.user_fullname = user_fullname
+        self.recipients = recipients
+
+    def send(self, subject, message, html_message):
+        if not self.recipients:
+            return
+
+        committer = None
+        if self.user_fullname:
+            committer = '.'.join(self.user_fullname.split(' ')).lower() + '@nice-software.com'
+
+        if html_message:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = committer
+            msg['To'] = ', '.join(self.recipients)
+            msg['Subject'] = subject
+
+            part1 = MIMEText(message, 'plain')
+            part2 = MIMEText(html_message, 'html')
+
+            msg.attach(part1)
+            msg.attach(part2)
+        else:
+            msg = MIMEText(message, _charset='utf-8')
+            msg['From'] = committer
+            msg['To'] = ', '.join(self.recipients)
+            msg['Subject'] = subject
+
+        server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(self.sender, self.sender_password)
+        server.sendmail(self.sender, self.recipients,
+                        msg.as_string())
+        server.rset()
+        server.quit()
+
 class RefChange(object):
-    def __init__(self, refname, oldrev, newrev):
+    def __init__(self, user_fullname, recipients, smtp_host, smtp_port,
+                 sender, sender_password,
+                 refname, oldrev, newrev):
+        self.mailer = Mailer(smtp_host, smtp_port, sender, sender_password, user_fullname, recipients)
         self.refname = refname
         self.oldrev = oldrev
         self.newrev = newrev
-        self.cc = set()
 
         if oldrev == None and newrev != None:
             self.change_type = CREATE
@@ -105,61 +151,15 @@ class RefChange(object):
 
     # Return the subject for the main email, without the leading [projectname]
     def get_subject(self):
-        raise NotImplemenetedError()
+        raise NotImplementedError()
 
     # Write the body of the main email to the given file object
-    def generate_body(self, out):
-        raise NotImplemenetedError()
+    def get_body(self):
+        raise NotImplementedError()
 
-    def generate_header(self, out, subject, include_revs=True, oldrev=None, newrev=None, cc=None):
-        user = os.environ['USER']
-        if user_fullname:
-            from_address = "%s <%s@src.gnome.org>" % (Header.Header(user_fullname.decode('utf-8')), user)
-        else:
-            from_address = "%s@src.gnome.org" % (user)
-
-        if cc is None:
-            cc = self.cc
-
-        print >>out, s("""
-To: %(recipients)s
-Cc: %(cc)s
-From: %(from_address)s
-Subject: %(subject)s
-Keywords: %(projectshort)s
-X-Git-Refname: %(refname)s
-MIME-Version: 1.0
-Content-Type: text/plain; charset="utf-8"
-Content-Transfer-Encoding: 8bit
-""") % {
-            'recipients': recipients,
-            'cc': ','.join(cc),
-            'from_address': from_address,
-            'subject': Header.Header(subject.decode('utf-8')),
-            'projectshort': projectshort,
-            'refname': self.refname
-       }
-
-        if include_revs:
-            if oldrev:
-                oldrev = oldrev
-            else:
-                oldrev = NULL_REVISION
-            if newrev:
-                newrev = newrev
-            else:
-                newrev = NULL_REVISION
-
-            print >>out, s("""
-X-Git-Oldrev: %(oldrev)s
-X-Git-Newrev: %(newrev)s
-""") % {
-            'oldrev': oldrev,
-            'newrev': newrev,
-       }
-
-        # Trailing newline to signal the end of the header
-        print >>out
+    # Whether to format the body in html
+    def get_format_body_html(self):
+        return False
 
     def send_main_email(self):
         if not self.get_needs_main_email():
@@ -172,12 +172,11 @@ X-Git-Newrev: %(newrev)s
             extra = ""
         subject = "[" + projectshort + extra + "] " + self.get_subject()
 
-        email_out = start_email()
+        html_body = None
+        if self.get_format_body_html():
+            html_body = highlight(get_body(), DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
 
-        self.generate_header(email_out, subject, include_revs=True, oldrev=self.oldrev, newrev=self.newrev)
-        self.generate_body(email_out)
-
-        end_email()
+        self.mailer.send(get_subject(), get_body(), html_body)
 
     # Allow multiple emails to be sent - used for branch updates
     def send_extra_emails(self):
@@ -296,19 +295,21 @@ class BranchChange(RefChange):
     # Generate a short listing for a series of commits
     # show_details - whether we should mark commit where we aren't going to send
     # a detailed email. (Set the False when listing removed commits)
-    def generate_commit_summary(self, out, commits, show_details=True):
+    def generate_commit_summary(self, commits, show_details=True):
         detail_note = False
+        summary = ""
         for commit in commits:
             if show_details and not commit.id in self.detailed_commits:
                 detail = " (*)"
                 detail_note = True
             else:
                 detail = ""
-            print >>out, "  " + commit_oneline(commit) + detail
+            summary += "  " + commit_oneline(commit) + detail
 
         if detail_note:
-            print >>out
-            print >>out, "(*) This commit already existed in another branch; no separate mail sent"
+            summary += "(*) This commit already existed in another branch; no separate mail sent"
+
+        return summary
 
     def send_extra_emails(self):
         total = len(self.added_commits)
@@ -316,8 +317,6 @@ class BranchChange(RefChange):
         for i, commit in enumerate(self.added_commits):
             if not commit.id in self.detailed_commits:
                 continue
-
-            email_out = start_email()
 
             if self.short_refname == 'master':
                 branch = ""
@@ -343,50 +342,42 @@ class BranchChange(RefChange):
             # If there is a cover email, it has the X-Git-OldRev/X-Git-NewRev in it
             # for the total branch update. Without a cover email, we are conceptually
             # breaking up the update into individual updates for each commit
-            if self.needs_cover_email:
-                self.generate_header(email_out, subject, include_revs=False, cc=[])
-            else:
-                parent = git.rev_parse(commit.id + "^")
-                self.generate_header(email_out, subject,
-                                     include_revs=True,
-                                     oldrev=parent, newrev=commit.id)
+            #if self.needs_cover_email:
+            #    self.generate_header(subject, include_revs=False, cc=[])
+            #else:
+            #    parent = git.rev_parse(commit.id + "^")
+            #    self.generate_header(subject,
+            #                         include_revs=True,
+            #                         oldrev=parent, newrev=commit.id)
 
-            email_out.flush()
-            git.show(commit.id, M=True, stat=True, _outfile=email_out)
-            email_out.flush()
-            git.show(commit.id, p=True, M=True, diff_filter="ACMRTUXB", pretty="format:---", _outfile=email_out)
-            end_email()
+            body =  git.show(commit.id, M=True, stat=True) + \
+                    git.show(commit.id, p=True, M=True, diff_filter="ACMRTUXB", pretty="format:---")
+            html_body = highlight(body, DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
+
+            self.mailer.send(subject, body, html_body)
 
 class BranchCreation(BranchChange):
     def __init__(self, *args):
         BranchChange.__init__(self, *args)
 
-        # Inform required parties in case of official branch creation
-        if re.match(r'gnome-[0-9]+-[0-9]+$', self.short_refname):
-            self.cc.update((
-                'release-team@gnome.org',
-                'gnome-doc-list@gnome.org',
-                'gnome-i18n@gnome.org',
-                '%s@src.gnome.org' % os.environ['USER']
-            ))
-
     def get_subject(self):
         return self.get_count_string() + "Created branch " + self.short_refname
 
-    def generate_body(self, out):
+    def get_body(self):
         if len(self.added_commits) > 0:
-            print >>out, s("""
+            return s("""
 The branch '%(short_refname)s' was created.
 
 Summary of new commits:
 
+%(summary)s
+
 """) % {
             'short_refname': self.short_refname,
+            'summary': self.generate_commit_summary(self.added_commits)
        }
-
-            self.generate_commit_summary(out, self.added_commits)
         else:
-            print >>out, s("""
+            return s("""
 The branch '%(short_refname)s' was created pointing to:
 
  %(commit_oneline)s
@@ -425,16 +416,18 @@ class BranchUpdate(BranchChange):
                 # The ... indicates we are only showing one of many, don't need it for a single commit
                 return last_commit.subject[0:SUBJECT_MAX_SUBJECT_CHARS]
 
-    def generate_body_normal(self, out):
-        print >>out, s("""
+    def generate_body_normal(self):
+        return s("""
 Summary of changes:
 
-""")
+%(summary)s
 
-        self.generate_commit_summary(out, self.added_commits)
+""") % {
+            'summary': self.generate_commit_summary(self.added_commits)
+       }
 
-    def generate_body_non_fast_forward(self, out):
-        print >>out, s("""
+    def generate_body_non_fast_forward(self):
+        return s("""
 The branch '%(short_refname)s' was changed in a way that was not a fast-forward update.
 NOTE: This may cause problems for people pulling from the branch. For more information,
 please see:
@@ -443,31 +436,30 @@ please see:
 
 Commits removed from the branch:
 
-""") % {
-            'short_refname': self.short_refname,
-       }
-
-        self.generate_commit_summary(out, self.removed_commits, show_details=False)
-
-        print >>out, s("""
+%(commits_removed)s
 
 Commits added to the branch:
 
-""")
-        self.generate_commit_summary(out, self.added_commits)
+%(commits_added)s
 
-    def generate_body(self, out):
+""") % {
+            'short_refname': self.short_refname,
+            'commits_removed': self.generate_commit_summary(self.removed_commits, show_details=False),
+            'commits_added': self.generate_commit_summary(self.added_commits)
+       }
+
+    def get_body(self):
         if len(self.removed_commits) == 0:
-            self.generate_body_normal(out)
+            return self.generate_body_normal()
         else:
-            self.generate_body_non_fast_forward(out)
+            return self.generate_body_non_fast_forward()
 
 class BranchDeletion(RefChange):
     def get_subject(self):
         return "Deleted branch " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The branch '%(short_refname)s' was deleted.
 """) % {
             'short_refname': self.short_refname,
@@ -524,20 +516,7 @@ class AnnotatedTagChange(RefChange):
         self.message = "\n".join(["    " + line for line in message_lines])
 
     # Outputs information about the new tag
-    def generate_tag_info(self, out):
-
-        print >>out, s("""
-Tagger: %(tagger)s
-Date: %(date)s
-
-%(message)s
-
-""") % {
-            'tagger': self.tagger,
-            'date': self.date,
-            'message': self.message,
-       }
-
+    def generate_tag_info(self):
         # We take the creation of an annotated tag as being a "mini-release-announcement"
         # and show a 'git shortlog' of the changes since the last tag that was an
         # ancestor of the new tag.
@@ -551,7 +530,7 @@ Date: %(date)s
 
         if last_tag:
             revision_range = last_tag + ".." + self.newrev
-            print >>out, s("""
+            extra = s("""
 Changes since the last tag '%(last_tag)s':
 
 """) % {
@@ -559,12 +538,29 @@ Changes since the last tag '%(last_tag)s':
       }
         else:
             revision_range = self.newrev
-            print >>out, s("""
+            extra = s("""
 Changes:
 
-""")
-        out.write(git.shortlog(revision_range))
-        out.write("\n")
+%(short_log)s
+
+""") % {
+           'short_log': git.shortlog(revision_range)
+       }
+
+        return s("""
+Tagger: %(tagger)s
+Date: %(date)s
+
+%(message)s
+
+%(extra)s
+
+""") % {
+            'tagger': self.tagger,
+            'date': self.date,
+            'message': self.message,
+            'extra': extra
+       }
 
     def get_tag_type(self):
         if self.have_signature:
@@ -576,25 +572,28 @@ class AnnotatedTagCreation(AnnotatedTagChange):
     def get_subject(self):
         return "Created tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The %(tag_type)s '%(short_refname)s' was created.
+
+%(tag_info)s
 
 """) % {
             'tag_type': self.get_tag_type(),
             'short_refname': self.short_refname,
+            'tag_info': self.generate_tag_info()
        }
-        self.generate_tag_info(out)
 
 class AnnotatedTagDeletion(AnnotatedTagChange):
     def get_subject(self):
         return "Deleted tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The %(tag_type)s '%(short_refname)s' was deleted. It previously pointed to:
 
- %(old_commit_oneline)s
+%(old_commit_oneline)s
+
 """) % {
             'tag_type': self.get_tag_type(),
             'short_refname': self.short_refname,
@@ -605,8 +604,8 @@ class AnnotatedTagUpdate(AnnotatedTagChange):
     def get_subject(self):
         return "Updated tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The tag '%(short_refname)s' was replaced with a new tag. It previously
 pointed to:
 
@@ -619,11 +618,13 @@ For more information, please see:
 
 New tag information:
 
+%(tag_info)s
+
 """) % {
             'short_refname': self.short_refname,
             'old_commit_oneline': commit_oneline(self.old_commit_id),
+            'tag_info': self.generate_tag_info()
        }
-        self.generate_tag_info(out)
 
 # ========================
 
@@ -631,11 +632,12 @@ class LightweightTagCreation(RefChange):
     def get_subject(self):
         return "Created tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The lightweight tag '%(short_refname)s' was created pointing to:
 
- %(commit_oneline)s
+%(commit_oneline)s
+
 """) % {
             'short_refname': self.short_refname,
             'commit_oneline': commit_oneline(self.newrev)
@@ -645,11 +647,12 @@ class LightweightTagDeletion(RefChange):
     def get_subject(self):
         return "Deleted tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The lighweight tag '%(short_refname)s' was deleted. It previously pointed to:
 
- %(commit_oneline)s
+%(commit_oneline)s
+
 """) % {
             'short_refname': self.short_refname,
             'commit_oneline': commit_oneline(self.oldrev)
@@ -659,8 +662,8 @@ class LightweightTagUpdate(RefChange):
     def get_subject(self):
         return "Updated tag " + self.short_refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The lightweight tag '%(short_refname)s' was updated to point to:
 
  %(commit_oneline)s
@@ -685,8 +688,8 @@ class InvalidRefDeletion(RefChange):
     def get_subject(self):
         return "Deleted invalid ref " + self.refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The ref '%(refname)s' was deleted. It previously pointed nowhere.
 """) % {
             'refname': self.refname,
@@ -695,16 +698,16 @@ The ref '%(refname)s' was deleted. It previously pointed nowhere.
 # ========================
 
 class MiscChange(RefChange):
-    def __init__(self, refname, oldrev, newrev, message):
-        RefChange.__init__(self, refname, oldrev, newrev)
+    def __init__(self, user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev, message):
+        RefChange.__init__(self, user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev)
         self.message = message
 
 class MiscCreation(MiscChange):
     def get_subject(self):
         return "Unexpected: Created " + self.refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The ref '%(refname)s' was created pointing to:
 
  %(newrev)s
@@ -722,8 +725,8 @@ class MiscDeletion(MiscChange):
     def get_subject(self):
         return "Unexpected: Deleted " + self.refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The ref '%(refname)s' was deleted. It previously pointed to:
 
  %(oldrev)s
@@ -741,8 +744,8 @@ class MiscUpdate(MiscChange):
     def get_subject(self):
         return "Unexpected: Updated " + self.refname
 
-    def generate_body(self, out):
-        print >>out, s("""
+    def get_body(self):
+        return s("""
 The ref '%(refname)s' was updated from:
 
  %(newrev)s
@@ -763,7 +766,7 @@ This is unexpected because:
 
 # ========================
 
-def make_change(oldrev, newrev, refname):
+def make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, oldrev, newrev, refname):
     refname = refname
 
     # Canonicalize
@@ -803,7 +806,7 @@ def make_change(oldrev, newrev, refname):
 
     # Closing the arguments like this simplifies the following code
     def make(cls, *args):
-        return cls(refname, oldrev, newrev, *args)
+        return cls(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev, *args)
 
     def make_misc_change(message):
         if change_type == CREATE:
@@ -847,8 +850,6 @@ def make_change(oldrev, newrev, refname):
 
 def main():
     global projectshort
-    global user_fullname
-    global recipients
 
     # No emails for a repository in the process of being imported
     git_dir = git.rev_parse(git_dir=True, _quiet=True)
@@ -857,13 +858,40 @@ def main():
 
     projectshort = get_module_name()
 
+    user_fullname = None
+    # Figure out a human-readable username
     try:
-        recipients = git.config("hooks.mailinglist", _quiet=True)
-    except CalledProcessError:
-        pass
+        entry = pwd.getpwuid(os.getuid())
+        gecos = entry.pw_gecos
+    except:
+        gecos = None
 
-    if not recipients:
-        die("hooks.mailinglist is not set")
+    if gecos != None:
+        # Typical account have "Ignacio Casal" for the GECOS.
+        # Comma-separated fields are also possible
+        m = re.match("([^,<]+)", gecos)
+        if m:
+            fullname = m.group(1).strip()
+            if fullname != "":
+                user_fullname = fullname
+
+    def get_config(hook, skip=False):
+        hook_val = None
+        try:
+            hook_val = git.config(hook, _quiet=True)
+        except CalledProcessError:
+            pass
+
+        if not hook_val and not skip:
+            die("%s is not set" % hook)
+
+        return hook_val
+
+    recipients = get_config("hooks.mailinglist")
+    smtp_host = get_config("hooks.smtp-host")
+    smtp_port = get_config("hooks.smtp-port", True)
+    smtp_sender = get_config("hooks.smtp-sender")
+    smtp_sender_pass = get_config("hooks.smtp-sender-password")
 
     changes = []
 
@@ -871,13 +899,15 @@ def main():
         # For testing purposes, allow passing in a ref update on the command line
         if len(sys.argv) != 4:
             die("Usage: generate-commit-mail OLDREV NEWREV REFNAME")
-        changes.append(make_change(sys.argv[1], sys.argv[2], sys.argv[3]))
+        changes.append(make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass,
+                                   sys.argv[1], sys.argv[2], sys.argv[3]))
     else:
         for line in sys.stdin:
             items = line.strip().split()
             if len(items) != 3:
                 die("Input line has unexpected number of items")
-            changes.append(make_change(items[0], items[1], items[2]))
+            changes.append(make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass,
+                                       items[0], items[1], items[2]))
 
     for change in changes:
         all_changes[change.refname] = change
@@ -889,3 +919,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# ex:et:ts=4:
