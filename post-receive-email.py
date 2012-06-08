@@ -858,28 +858,12 @@ def main():
     projectshort = get_module_name()
 
     try:
-        recipients=git.config("hooks.mailinglist", _quiet=True)
+        recipients = git.config("hooks.mailinglist", _quiet=True)
     except CalledProcessError:
         pass
 
     if not recipients:
         die("hooks.mailinglist is not set")
-
-    # Figure out a human-readable username
-    try:
-        entry = pwd.getpwuid(os.getuid())
-        gecos = entry.pw_gecos
-    except:
-        gecos = None
-
-    if gecos != None:
-        # Typical GNOME account have John Doe <john.doe@example.com> for the GECOS.
-        # Comma-separated fields are also possible
-        m = re.match("([^,<]+)", gecos)
-        if m:
-            fullname = m.group(1).strip()
-            if fullname != "":
-                user_fullname = fullname
 
     changes = []
 
