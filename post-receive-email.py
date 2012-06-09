@@ -332,10 +332,11 @@ class BranchChange(RefChange):
             else:
                 count_string = ""
 
-            subject = "[%(projectshort)s%(branch)s%(count_string)s] %(subject)s" % {
+            subject = "[%(projectshort)s%(branch)s%(count_string)s] [%(revision)s] %(subject)s" % {
                 'projectshort' : projectshort,
                 'branch' : branch,
                 'count_string' : count_string,
+                'revision' : git.rev_list('--all').count('\n'),
                 'subject' : commit.subject[0:SUBJECT_MAX_SUBJECT_CHARS]
                 }
 
@@ -350,7 +351,7 @@ class BranchChange(RefChange):
             #                         include_revs=True,
             #                         oldrev=parent, newrev=commit.id)
 
-            body =  git.show(commit.id, M=True, stat=True) + \
+            body =  git.show(commit.id, M=True, stat=True) + "\n" + \
                     git.show(commit.id, p=True, M=True, diff_filter="ACMRTUXB", pretty="format:---")
             html_body = highlight(body, DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
 
