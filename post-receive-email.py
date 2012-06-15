@@ -307,7 +307,7 @@ class BranchChange(RefChange):
             summary += "  " + commit_oneline(commit) + detail + "\n"
 
         if detail_note:
-            summary += "(*) This commit already existed in another branch; no separate mail sent"
+            summary += "\n(*) This commit already existed in another branch; no separate mail sent"
 
         return summary
 
