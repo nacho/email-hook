@@ -174,7 +174,7 @@ class RefChange(object):
 
         html_body = None
         if self.get_format_body_html():
-            html_body = highlight(get_body(), DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
+            html_body = highlight(self.get_body(), DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
 
         self.mailer.send(subject, self.get_body(), html_body)
 
