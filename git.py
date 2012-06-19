@@ -171,7 +171,7 @@ def commit_oneline(commit):
     if isinstance(commit, basestring):
         commit = load_commit(commit)
 
-    return commit.id[0:7]+"... " + commit.subject[0:59]
+    return commit.id[0:7] + "... " + commit.subject[0:59]
 
 # Return the directory name with .git stripped as a short identifier
 # for the module

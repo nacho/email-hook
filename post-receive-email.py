@@ -176,7 +176,7 @@ class RefChange(object):
         if self.get_format_body_html():
             html_body = highlight(get_body(), DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
 
-        self.mailer.send(self.get_subject(), self.get_body(), html_body)
+        self.mailer.send(subject, self.get_body(), html_body)
 
     # Allow multiple emails to be sent - used for branch updates
     def send_extra_emails(self):
