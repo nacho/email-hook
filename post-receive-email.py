@@ -4,6 +4,7 @@
 #
 # Copyright (C) 2008  Owen Taylor
 # Copyright (C) 2009  Red Hat, Inc
+# Copyright (C) 2012  Ignacio Casal Quinteiro
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
