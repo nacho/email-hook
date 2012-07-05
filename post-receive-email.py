@@ -337,7 +337,7 @@ class BranchChange(RefChange):
                 'projectshort' : projectshort,
                 'branch' : branch,
                 'count_string' : count_string,
-                'revision' : git.rev_list('--all').count('\n') + 1,
+                'revision' : git.rev_list('--all').count('\n') + 1 - (total - (i + 1)),
                 'subject' : commit.subject[0:SUBJECT_MAX_SUBJECT_CHARS]
                 }
 
