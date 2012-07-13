@@ -89,8 +89,8 @@ class Mailer(object):
             msg['To'] = self.recipients
             msg['Subject'] = subject
 
-            part1 = MIMEText(message, 'plain')
-            part2 = MIMEText(html_message, 'html')
+            part1 = MIMEText(message, 'plain', 'utf-8')
+            part2 = MIMEText(html_message, 'html', 'utf-8')
 
             msg.attach(part1)
             msg.attach(part2)
