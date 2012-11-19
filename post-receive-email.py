@@ -530,6 +530,7 @@ class AnnotatedTagChange(RefChange):
             # Assume that this means no older tag
             pass
 
+        extra = ""
         if last_tag:
             revision_range = last_tag + ".." + self.newrev
             extra = s("""
@@ -540,7 +541,8 @@ Changes since the last tag '%(last_tag)s':
       }
         else:
             revision_range = self.newrev
-            extra = s("""
+
+        extra += s("""
 Changes:
 
 %(short_log)s
