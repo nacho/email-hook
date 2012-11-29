@@ -554,7 +554,7 @@ Changes:
 
 """) % {
            'short_log': git.shortlog(revision_range),
-           'short_stat': git.diff(shortstat=True, last_tag)
+           'short_stat': git.diff(last_tag, shortstat=True)
        }
 
         return s("""
