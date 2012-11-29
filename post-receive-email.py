@@ -540,10 +540,13 @@ Changes since the last tag '%(last_tag)s':
                 'last_tag': last_tag
       }
         else:
+            extra = s("""
+Changes:
+
+""")
             revision_range = self.newrev
 
         extra += s("""
-Changes:
 
 %(short_log)s
 
