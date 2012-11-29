@@ -550,8 +550,11 @@ Changes:
 
 %(short_log)s
 
+$(short_stat)s
+
 """) % {
            'short_log': git.shortlog(revision_range)
+           'short_stat': git.diff(shortstat=True, last_tag)
        }
 
         return s("""
