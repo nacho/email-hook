@@ -135,13 +135,13 @@ def rev_list_commits(*args, **kwargs):
     kwargs_copy['_split_lines'] = True
     lines = git.rev_list(*args, **kwargs_copy)
     if (len(lines) % 2 != 0):
-        raise RuntimeException("git rev-list didn't return an even number of lines")
+        raise RuntimeError("git rev-list didn't return an even number of lines")
 
     result = []
     for i in xrange(0, len(lines), 2):
         m = re.match("commit\s+([A-Fa-f0-9]+)", lines[i])
         if not m:
-            raise RuntimeException("Can't parse commit it '%s'", lines[i])
+            raise RuntimeError("Can't parse commit it '%s'", lines[i])
         commit_id = m.group(1)
         subject = lines[i + 1]
         result.append(GitCommit(commit_id, subject))
@@ -209,3 +209,20 @@ def get_project_description():
         projectdesc = ''
 
     return projectdesc
+
+def get_committer_email(rev):
+    try:
+        git_email = git.show('--raw', '--pretty=format:%an <%aE>', rev)
+    except CalledProcessError:
+        die("GIT_ERROR retrieving email")
+
+    if git_email is None:
+        return None
+    if len(git_email.strip()) == 0:
+        return None
+
+    array = git_email.strip().splitlines()
+    if len(array) == 0:
+        return None
+
+    return array[0]

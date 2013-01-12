@@ -67,21 +67,23 @@ processed_changes = {}
 
 class Mailer(object):
     def __init__(self, smtp_host, smtp_port,
-                 sender, sender_password, user_fullname, recipients):
+                 sender, sender_username, sender_password, recipients, newrev):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.sender = sender
         self.sender_password = sender_password
-        self.user_fullname = user_fullname
         self.recipients = recipients
+        self.newrev = newrev
+        self.sender_username = sender_username
 
     def send(self, subject, message, html_message):
         if not self.recipients:
             return
 
-        committer = None
-        if self.user_fullname:
-            committer = '.'.join(self.user_fullname.split(' ')).lower() + '@nice-software.com'
+        committer = get_committer_email(self.newrev)
+
+        if committer is None:
+            committer = "{0} <{1}>".format('Unknown', self.sender)
 
         if html_message:
             msg = MIMEMultipart('alternative')
@@ -102,19 +104,19 @@ class Mailer(object):
 
         server = smtplib.SMTP(self.smtp_host, self.smtp_port)
         server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(self.sender, self.sender_password)
+        if self.sender_username is None or self.sender_username.strip() == '':
+            server.login(self.sender_username, self.sender_password)
+
         server.sendmail(self.sender, self.recipients,
                         msg.as_string())
         server.rset()
         server.quit()
 
 class RefChange(object):
-    def __init__(self, user_fullname, recipients, smtp_host, smtp_port,
-                 sender, sender_password,
+    def __init__(self, recipients, smtp_host, smtp_port,
+                 sender, sender_username, sender_password,
                  refname, oldrev, newrev):
-        self.mailer = Mailer(smtp_host, smtp_port, sender, sender_password, user_fullname, recipients)
+        self.mailer = Mailer(smtp_host, smtp_port, sender, sender_username, sender_password, recipients, newrev)
         self.refname = refname
         self.oldrev = oldrev
         self.newrev = newrev
@@ -708,8 +710,8 @@ The ref '%(refname)s' was deleted. It previously pointed nowhere.
 # ========================
 
 class MiscChange(RefChange):
-    def __init__(self, user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev, message):
-        RefChange.__init__(self, user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev)
+    def __init__(self, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev, message):
+        RefChange.__init__(self, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev)
         self.message = message
 
 class MiscCreation(MiscChange):
@@ -776,7 +778,7 @@ This is unexpected because:
 
 # ========================
 
-def make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, oldrev, newrev, refname):
+def make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_username, smtp_sender_pass, oldrev, newrev, refname):
     refname = refname
 
     # Canonicalize
@@ -816,7 +818,7 @@ def make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, sm
 
     # Closing the arguments like this simplifies the following code
     def make(cls, *args):
-        return cls(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass, refname, oldrev, newrev, *args)
+        return cls(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev, *args)
 
     def make_misc_change(message):
         if change_type == CREATE:
@@ -868,23 +870,6 @@ def main():
 
     projectshort = get_module_name()
 
-    user_fullname = None
-    # Figure out a human-readable username
-    try:
-        entry = pwd.getpwuid(os.getuid())
-        gecos = entry.pw_gecos
-    except:
-        gecos = None
-
-    if gecos != None:
-        # Typical account have "Ignacio Casal" for the GECOS.
-        # Comma-separated fields are also possible
-        m = re.match("([^,<]+)", gecos)
-        if m:
-            fullname = m.group(1).strip()
-            if fullname != "":
-                user_fullname = fullname
-
     def get_config(hook, skip=False):
         hook_val = None
         try:
@@ -901,7 +886,8 @@ def main():
     smtp_host = get_config("hooks.smtp-host")
     smtp_port = get_config("hooks.smtp-port", True)
     smtp_sender = get_config("hooks.smtp-sender")
-    smtp_sender_pass = get_config("hooks.smtp-sender-password")
+    smtp_sender_user = get_config("hooks.smtp-sender-username", True)
+    smtp_sender_pass = get_config("hooks.smtp-sender-password", True)
 
     changes = []
 
@@ -909,14 +895,14 @@ def main():
         # For testing purposes, allow passing in a ref update on the command line
         if len(sys.argv) != 4:
             die("Usage: generate-commit-mail OLDREV NEWREV REFNAME")
-        changes.append(make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass,
+        changes.append(make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_user, smtp_sender_pass,
                                    sys.argv[1], sys.argv[2], sys.argv[3]))
     else:
         for line in sys.stdin:
             items = line.strip().split()
             if len(items) != 3:
                 die("Input line has unexpected number of items")
-            changes.append(make_change(user_fullname, recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_pass,
+            changes.append(make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_user, smtp_sender_pass,
                                        items[0], items[1], items[2]))
 
     for change in changes:
