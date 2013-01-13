@@ -51,6 +51,8 @@ from util import die, strip_string as s
 
 # When we put a git subject into the Subject: line, where to truncate
 SUBJECT_MAX_SUBJECT_CHARS = 100
+MAX_HTML_BODY_SIZE = 10*1024*1024
+MAX_DETAIL_BODY_SIZE = 20*1024*1024
 
 CREATE = 0
 UPDATE = 1
@@ -176,10 +178,17 @@ class RefChange(object):
         subject = "[" + projectshort + extra + "] " + self.get_subject()
 
         html_body = None
-        if self.get_format_body_html():
-            html_body = highlight(self.get_body(), DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
 
-        self.mailer.send(subject, self.get_body(), html_body)
+        body = self.get_body()
+
+        if len(body) < MAX_HTML_BODY_SIZE:
+            try:
+                if self.get_format_body_html():
+                    html_body = highlight(body, DiffLexer(encoding='latin1'), HtmlFormatter(full=True, noclasses=True, nobackground=True, encoding='latin1'))
+            except UnicodeDecodeError:
+                html_body = None
+	    
+        self.mailer.send(subject, body, html_body)
 
     # Allow multiple emails to be sent - used for branch updates
     def send_extra_emails(self):
@@ -353,10 +362,19 @@ class BranchChange(RefChange):
             #    self.generate_header(subject,
             #                         include_revs=True,
             #                         oldrev=parent, newrev=commit.id)
+            body_summary = git.show(commit.id, M=True, stat=True)
 
-            body =  git.show(commit.id, M=True, stat=True) + "\n" + \
+            body =  body_summary + "\n" + \
                     git.show(commit.id, p=True, M=True, diff_filter="ACMRTUXB", pretty="format:---")
-            html_body = highlight(body, DiffLexer(), HtmlFormatter(full=True, noclasses=True, nobackground=True))
+            if len(body) < MAX_DETAIL_BODY_SIZE:
+                body = body_summary + "\n"
+
+            html_body = None
+            if len(body) < MAX_HTML_BODY_SIZE:
+                try:
+                    html_body = highlight(body, DiffLexer(encoding='latin1'), HtmlFormatter(encoding='latin1', full=True, noclasses=True, nobackground=True))
+                except UnicodeDecodeError:
+                    html_body = None
 
             self.mailer.send(subject, body, html_body)
 
