@@ -106,7 +106,7 @@ class Mailer(object):
 
         server = smtplib.SMTP(self.smtp_host, self.smtp_port)
         server.ehlo()
-        if self.sender_username is None or self.sender_username.strip() == '':
+        if self.sender_username is not None and self.sender_username.strip() != '':
             server.login(self.sender_username, self.sender_password)
 
         server.sendmail(self.sender, self.recipients,
