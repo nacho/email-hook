@@ -26,7 +26,7 @@
 # are pushed to the GNOME git repository. It accepts input in the form of
 # a Git post-receive hook, and generates appropriate emails.
 #
-# The attempt here is to provide a maximimally useful and robust output
+# The attempt here is to provide a maximally useful and robust output
 # with as little clutter as possible.
 #
 
