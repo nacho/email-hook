@@ -1,1 +1,10 @@
 Email hook script based on GNOME ones
+-------------------------------------
+
+The script requires a few git config variables to be set:
+
+* hooks.mailinglist = recipient email-address
+* hooks.smtp-host = SMTP host that receives email
+* hooks.smtp-port = SMTP port for receiving email
+* hooks.smtp-sender = Username for SMTP auth
+* hooks.smtp-sender-password = Password for SMTP auth
