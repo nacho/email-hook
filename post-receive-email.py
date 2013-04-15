@@ -32,7 +32,6 @@
 
 import re
 import os
-import pwd
 import sys
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -51,8 +50,8 @@ from util import die, strip_string as s
 
 # When we put a git subject into the Subject: line, where to truncate
 SUBJECT_MAX_SUBJECT_CHARS = 100
-MAX_HTML_BODY_SIZE = 10*1024*1024
-MAX_DETAIL_BODY_SIZE = 20*1024*1024
+MAX_HTML_BODY_SIZE = 5*1024*1024
+MAX_DETAIL_BODY_SIZE = 10*1024*1024
 
 CREATE = 0
 UPDATE = 1
@@ -61,6 +60,7 @@ INVALID_TAG = 3
 
 # Short name for project
 projectshort = None
+debug = False
 
 # map of ref_name => Change object; this is used when computing whether
 # we've previously generated a detailed diff for a commit in the push
@@ -79,6 +79,12 @@ class Mailer(object):
         self.sender_username = sender_username
 
     def send(self, subject, message, html_message):
+
+        global debug
+        if (debug):
+            print message
+            return
+
         if not self.recipients:
             return
 
@@ -366,8 +372,8 @@ class BranchChange(RefChange):
 
             body =  body_summary + "\n" + \
                     git.show(commit.id, p=True, M=True, diff_filter="ACMRTUXB", pretty="format:---")
-            if len(body) < MAX_DETAIL_BODY_SIZE:
-                body = body_summary + "\n"
+            if len(body) > MAX_DETAIL_BODY_SIZE:
+                body = body_summary + "\n (The body has been shortened. Not all diffs are included) \n\n"
 
             html_body = None
             if len(body) < MAX_HTML_BODY_SIZE:
@@ -796,6 +802,52 @@ This is unexpected because:
 
 # ========================
 
+class MiscMergePullRequest(MiscChange):
+    def get_subject(self):
+        return "Unexpected: Updated " + self.refname
+
+    def get_body(self):
+        return s("""
+The pull-request ref '%(refname)s' was merged. A new ref has been created for the merge pointing to:
+
+ %(newrev)s
+
+""") % {
+            'refname': self.refname,
+            'oldrev': self.oldrev,
+      }
+
+# ========================
+
+class MiscCreatePullRequest(MiscChange):
+    def get_subject(self):
+        return "Created pull request " + self.refname
+
+    def get_body(self):
+        return s("""
+The ref for a pull request '%(refname)s' was created pointing to:
+
+ %(newrev)s
+
+""") % {
+            'refname': self.refname,
+            'oldrev': self.oldrev,
+      }
+
+# ========================
+
+class EmptyUpdate:
+    def __init__ (self, refname):
+        self.refname = refname
+
+    def prepare (self):
+        # do nothing
+        pass
+
+    def send_emails(self):
+        # do not send emails either
+        pass
+
 def make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_username, smtp_sender_pass, oldrev, newrev, refname):
     refname = refname
 
@@ -874,9 +926,13 @@ def make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_usern
         else:
             return make_misc_change("%s is not a commit object" % target)
     elif re.match(r'^refs/remotes/.*$', refname):
-        return make_misc_change("'%s' is a tracking branch and doesn't belong on the server" % refname)
+        return EmptyUpdate(refname)
+    elif re.match(r'^refs/pull/.*$/head', refname):
+        return make(MiscCreatePullRequest)
+    elif re.match(r'^refs/pull/.*$/merge', refname):
+        return make(MiscMergePullRequest)
     else:
-        return make_misc_change("'%s' is not in refs/heads/ or refs/tags/" % refname)
+        return EmptyUpdate(refname)
 
 def main():
     global projectshort
@@ -900,10 +956,17 @@ def main():
 
         return hook_val
 
-    recipients = get_config("hooks.mailinglist")
-    smtp_host = get_config("hooks.smtp-host")
+    global debug
+    if (len(sys.argv) > 1):
+        debug = True
+        print "Debug Mode on"
+    else:
+        debug = False
+
+    recipients = get_config("hooks.mailinglist", debug)
+    smtp_host = get_config("hooks.smtp-host", debug)
     smtp_port = get_config("hooks.smtp-port", True)
-    smtp_sender = get_config("hooks.smtp-sender")
+    smtp_sender = get_config("hooks.smtp-sender", debug)
     smtp_sender_user = get_config("hooks.smtp-sender-username", True)
     smtp_sender_pass = get_config("hooks.smtp-sender-password", True)
 
