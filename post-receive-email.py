@@ -927,9 +927,9 @@ def make_change(recipients, smtp_host, smtp_port, smtp_sender, smtp_sender_usern
             return make_misc_change("%s is not a commit object" % target)
     elif re.match(r'^refs/remotes/.*$', refname):
         return EmptyUpdate(refname)
-    elif re.match(r'^refs/pull/.*$/head', refname):
+    elif re.match(r'^refs/pull/.*/head$', refname):
         return make(MiscCreatePullRequest)
-    elif re.match(r'^refs/pull/.*$/merge', refname):
+    elif re.match(r'^refs/pull/.*/merge$', refname):
         return make(MiscMergePullRequest)
     else:
         return EmptyUpdate(refname)
