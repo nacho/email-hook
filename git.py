@@ -210,11 +210,26 @@ def get_project_description():
 
     return projectdesc
 
-def get_committer_email(rev):
-    try:
-        git_email = git.show('--raw', '--pretty=format:%an <%aE>', rev)
-    except CalledProcessError:
-        die("GIT_ERROR retrieving email")
+def get_committer_email(rev, fallback_email):
+    git_email = None
+
+    if rev:
+        try:
+            git_email = git.show('--raw', '--pretty=format:%an <%aE>', rev)
+        except CalledProcessError:
+            die("GIT_ERROR retrieving email")
+    else:
+        # use fallback email
+        try:
+            entry = pwd.getpwuid(os.getuid())
+            gecos = entry.pw_gecos
+            name = entry.pw_name
+        except:
+            gecos = None
+            name = None
+
+        if gecos != None and name != None:
+            git_email = "{0} <{1}@{2}>".format(gecos.lower(), name.lower(), fallback_email)
 
     if git_email is None:
         return None

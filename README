@@ -6,6 +6,6 @@ The script requires a few git config variables to be set:
 * hooks.mailinglist = recipient email-address
 * hooks.smtp-host = SMTP host that receives email
 * hooks.smtp-port = SMTP port for receiving email
-* hooks.smtp-sender = Envelope sender email address
+* hooks.smtp-fallback-mail = Fallback hostname for mail addresses
 * hooks.smtp-sender-username = Username for SMTP auth
 * hooks.smtp-sender-password = Password for SMTP auth
