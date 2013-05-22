@@ -229,7 +229,7 @@ def get_committer_email(rev, fallback_email):
             name = None
 
         if gecos != None and name != None:
-            git_email = "{0} <{1}@{2}>".format(gecos.lower(), name.lower(), fallback_email)
+            git_email = "{0} <{1}@{2}>".format(gecos, name.lower(), fallback_email)
 
     if git_email is None:
         return None
