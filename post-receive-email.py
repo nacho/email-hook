@@ -89,7 +89,7 @@ class Mailer(object):
         if not self.recipients:
             return
 
-        committer = get_committer_email(self.newrev)
+        committer = get_committer_email(self.newrev, self.smtp_fallback_mail)
 
         if committer is None:
             committer = "{0}@{1}>".format('unknown', self.smtp_fallback_mail)
