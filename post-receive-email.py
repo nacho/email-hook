@@ -92,7 +92,7 @@ class Mailer(object):
         committer = get_committer_email(self.newrev, self.smtp_fallback_mail)
 
         if committer is None:
-            committer = "{0}@{1}>".format('unknown', self.smtp_fallback_mail)
+            committer = "{0}@{1}".format('unknown', self.smtp_fallback_mail)
 
         if html_message:
             msg = MIMEMultipart('alternative')
