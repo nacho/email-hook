@@ -23,6 +23,7 @@ import os
 import re
 from subprocess import Popen, PIPE
 import sys
+import pwd
 
 from util import die
 
