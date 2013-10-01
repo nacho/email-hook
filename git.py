@@ -224,6 +224,14 @@ def get_committer_email(rev, fallback_email):
         try:
             entry = pwd.getpwuid(os.getuid())
             gecos = entry.pw_gecos
+            # gecos might have trailing , chars
+            try:
+                i = gecos.index(',')
+            except:
+                pass
+            else:
+                gecos = gecos[:i]
+
             name = entry.pw_name
         except:
             gecos = None
