@@ -69,7 +69,7 @@ processed_changes = {}
 
 class Mailer(object):
     def __init__(self, smtp_host, smtp_port,
-                 smtp_fallback_mail, sender, sender_username, sender_password, recipients, newrev):
+                 smtp_fallback_mail, sender, sender_username, sender_password, use_tls, recipients, newrev):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.smtp_fallback_mail = smtp_fallback_mail
@@ -78,6 +78,7 @@ class Mailer(object):
         self.recipients = recipients
         self.newrev = newrev
         self.sender_username = sender_username
+        self.use_tls = use_tls
 
     def send(self, subject, message, html_message):
 
@@ -113,6 +114,9 @@ class Mailer(object):
 
         server = smtplib.SMTP(self.smtp_host, self.smtp_port)
         server.ehlo()
+        if self.use_tls is not None:
+            server.starttls()
+            server.ehlo()
         if self.sender_username is not None and self.sender_username.strip() != '':
             server.login(self.sender_username, self.sender_password)
 
@@ -123,9 +127,9 @@ class Mailer(object):
 
 class RefChange(object):
     def __init__(self, recipients, smtp_host, smtp_port,
-                 smtp_fallback_mail, sender, sender_username, sender_password,
+                 smtp_fallback_mail, sender, sender_username, sender_password, use_tls,
                  refname, oldrev, newrev):
-        self.mailer = Mailer(smtp_host, smtp_port, smtp_fallback_mail, sender, sender_username, sender_password, recipients, newrev)
+        self.mailer = Mailer(smtp_host, smtp_port, smtp_fallback_mail, sender, sender_username, sender_password, use_tls, recipients, newrev)
         self.refname = refname
         self.oldrev = oldrev
         self.newrev = newrev
@@ -735,8 +739,8 @@ The ref '%(refname)s' was deleted. It previously pointed nowhere.
 # ========================
 
 class MiscChange(RefChange):
-    def __init__(self, recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev, message):
-        RefChange.__init__(self, recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev)
+    def __init__(self, recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, use_tls, refname, oldrev, newrev, message):
+        RefChange.__init__(self, recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, use_tls, refname, oldrev, newrev)
         self.message = message
 
 class MiscCreation(MiscChange):
@@ -849,7 +853,7 @@ class EmptyUpdate:
         # do not send emails either
         pass
 
-def make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, oldrev, newrev, refname):
+def make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, use_tls, oldrev, newrev, refname):
     refname = refname
 
     # Canonicalize
@@ -889,7 +893,7 @@ def make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sende
 
     # Closing the arguments like this simplifies the following code
     def make(cls, *args):
-        return cls(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, refname, oldrev, newrev, *args)
+        return cls(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_username, smtp_sender_pass, use_tls, refname, oldrev, newrev, *args)
 
     def make_misc_change(message):
         if change_type == CREATE:
@@ -965,6 +969,7 @@ def main():
         debug = False
 
     recipients = get_config("hooks.mailinglist", debug)
+    use_tls = get_config("hooks.use-tls", True)
     smtp_host = get_config("hooks.smtp-host", debug)
     smtp_port = get_config("hooks.smtp-port", True)
     smtp_fallback_mail = get_config("hooks.smtp-fallback-mail", debug)
@@ -978,14 +983,14 @@ def main():
         # For testing purposes, allow passing in a ref update on the command line
         if len(sys.argv) != 4:
             die("Usage: generate-commit-mail OLDREV NEWREV REFNAME")
-        changes.append(make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_user, smtp_sender_pass,
+        changes.append(make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_user, smtp_sender_pass, use_tls,
                                    sys.argv[1], sys.argv[2], sys.argv[3]))
     else:
         for line in sys.stdin:
             items = line.strip().split()
             if len(items) != 3:
                 die("Input line has unexpected number of items")
-            changes.append(make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_user, smtp_sender_pass,
+            changes.append(make_change(recipients, smtp_host, smtp_port, smtp_fallback_mail, smtp_sender, smtp_sender_user, smtp_sender_pass, use_tls,
                                        items[0], items[1], items[2]))
 
     for change in changes:

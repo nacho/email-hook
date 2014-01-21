@@ -4,6 +4,7 @@ Email hook script based on GNOME ones
 The script requires a few git config variables to be set:
 
 * hooks.mailinglist = recipient email-address
+* hooks.use-tls = whether to use TLS
 * hooks.smtp-host = SMTP host that receives email
 * hooks.smtp-port = SMTP port for receiving email
 * hooks.smtp-fallback-mail = Fallback hostname for mail addresses
